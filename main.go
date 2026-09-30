@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	"github.com/renatopgn/Go/api"
 )
 
 func main() {
+
 	if err := run(); err != nil {
 		slog.Error("fail to execute code", "error", err)
 		return
@@ -18,7 +23,26 @@ func main() {
 }
 
 func run() error {
-	handler := api.NewHandler()
+
+	err := godotenv.Load()
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	url := os.Getenv("DATABASE_URL")
+
+	db, err := pgxpool.New(ctx, url)
+	if err != nil {
+		return err
+	}
+
+	if err := createTable(db); err != nil {
+		slog.Error("error to crate table users", "error", err)
+		return err
+	}
+
+	handler := api.NewHandler(db)
 
 	s := http.Server{
 		Addr:         ":8080",

@@ -8,38 +8,38 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/renatopgn/Go/packages"
 )
 
 type Response struct {
-	Error string `json:",omitempty"`
+	Error string `json:"error,omitempty"`
 	Data  any    `json:"data,omitempty"`
 }
 
-func NewHandler() http.Handler {
+func NewHandler(db *pgxpool.Pool) http.Handler {
 	r := chi.NewMux()
 
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 
-	data := map[packages.Id]packages.User{}
-
-	r.Get("/api/users", GetHandler(data))
-	r.Post("/api/users", PostHandler(data))
-	r.Get("/api/users/{id}", GetIDHandler(data))
-	r.Put("/api/users/{id}", PutIDHandler(data))
-	r.Delete("/api/users/{id}", DeleteHandler(data))
+	r.Get("/api/users", GetHandler(db))
+	r.Post("/api/users", PostHandler(db))
+	r.Get("/api/users/{id}", GetIDHandler(db))
+	r.Put("/api/users/{id}", PutIDHandler(db))
+	r.Delete("/api/users/{id}", DeleteHandler(db))
 
 	return r
 }
 
-func GetHandler(data map[packages.Id]packages.User) http.HandlerFunc {
+func GetHandler(db *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		user, err := packages.FindAll(data)
+		user, err := packages.FindAll(db)
 		if err != nil {
 			SendJSON(w, Response{Error: "something went wrong"}, http.StatusInternalServerError)
+			return
 		}
 
 		SendJSON(w, Response{Data: user}, http.StatusOK)
@@ -47,7 +47,7 @@ func GetHandler(data map[packages.Id]packages.User) http.HandlerFunc {
 
 }
 
-func PostHandler(data map[packages.Id]packages.User) http.HandlerFunc {
+func PostHandler(db *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var newUser packages.User
 		err := json.NewDecoder(r.Body).Decode(&newUser)
@@ -76,14 +76,18 @@ func PostHandler(data map[packages.Id]packages.User) http.HandlerFunc {
 			return
 		}
 
-		createdUser := packages.Insert(data, newUser)
+		createdUser, err := packages.Insert(db, newUser)
+		if err != nil {
+			SendJSON(w, Response{Error: "something went wrong"}, http.StatusInternalServerError)
+			return
+		}
 
 		SendJSON(w, Response{Data: createdUser}, http.StatusCreated)
 	}
 
 }
 
-func GetIDHandler(data map[packages.Id]packages.User) http.HandlerFunc {
+func GetIDHandler(db *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		idStr := chi.URLParam(r, "id")
 		SearchID, err := uuid.Parse(idStr)
@@ -94,7 +98,7 @@ func GetIDHandler(data map[packages.Id]packages.User) http.HandlerFunc {
 
 		ID := packages.Id(SearchID)
 
-		user, err := packages.FindById(data, ID)
+		user, err := packages.FindById(db, ID)
 		if err != nil {
 			slog.Error("erro pra mandar pra funcao", "erro", err)
 			SendJSON(w, Response{Error: "User not found"}, http.StatusNotFound)
@@ -107,7 +111,7 @@ func GetIDHandler(data map[packages.Id]packages.User) http.HandlerFunc {
 
 }
 
-func PutIDHandler(data map[packages.Id]packages.User) http.HandlerFunc {
+func PutIDHandler(db *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		idStr := chi.URLParam(r, "id")
 		SearchID, err := uuid.Parse(idStr)
@@ -142,7 +146,7 @@ func PutIDHandler(data map[packages.Id]packages.User) http.HandlerFunc {
 			return
 		}
 
-		UserUpdate, err := packages.Update(ID, updatesUser, data)
+		UserUpdate, err := packages.Update(ID, updatesUser, db)
 		if err != nil {
 			SendJSON(w, Response{Error: "user not found"}, http.StatusNotFound)
 			return
@@ -152,7 +156,7 @@ func PutIDHandler(data map[packages.Id]packages.User) http.HandlerFunc {
 	}
 }
 
-func DeleteHandler(data map[packages.Id]packages.User) http.HandlerFunc {
+func DeleteHandler(db *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		idStr := chi.URLParam(r, "id")
 		SearchID, err := uuid.Parse(idStr)
@@ -163,7 +167,7 @@ func DeleteHandler(data map[packages.Id]packages.User) http.HandlerFunc {
 
 		ID := packages.Id(SearchID)
 
-		removedUser, err := packages.Delete(data, ID)
+		removedUser, err := packages.Delete(db, ID)
 
 		if err != nil {
 			SendJSON(w, Response{Error: "user not found"}, http.StatusNotFound)
